@@ -86,15 +86,19 @@ func assetsApiHandler(c *gin.Context) {
 			c.JSON(http.StatusOK, RetJson{Code: 0, Error: "目录下不存在足够的图片"})
 			return
 		}
+		selected_imgs := make(map[string]struct{})
 		for i := 0; i < count; i++ {
 			imgs[i] = category_pic[category][rand.Intn(len_cate)]
+			if _, ok := selected_imgs[imgs[i]]; ok {
+				// 重新选一次，因为这个已经被选了
+				i--
+			}
 		}
-		req_url := c.Request.Host
 		if ret_type == "json" {
 			// json时候正常返回数量
 			data := make([]ImageData, count)
 			for i, img := range imgs {
-				data[i] = ImageData{Url: req_url + "/assets/" + category + "/" + img}
+				data[i] = ImageData{Url: "/assets/" + category + "/" + img}
 			}
 			c.JSON(http.StatusOK, RetJson{Code: 1, Data: data})
 		} else if ret_type == "file" {
