@@ -89,16 +89,17 @@ func assetsApiHandler(c *gin.Context) {
 		for i := 0; i < count; i++ {
 			imgs[i] = category_pic[category][rand.Intn(len_cate)]
 		}
+		req_url := c.Request.Host
 		if ret_type == "json" {
 			// json时候正常返回数量
 			data := make([]ImageData, count)
 			for i, img := range imgs {
-				data[i] = ImageData{Url: "http://127.0.0.1:8080/assets/" + category + "/" + img}
+				data[i] = ImageData{Url: req_url + "/assets/" + category + "/" + img}
 			}
 			c.JSON(http.StatusOK, RetJson{Code: 1, Data: data})
 		} else if ret_type == "file" {
 			// img时候直接重定向，忽略数量
-			c.Redirect(http.StatusSeeOther, "http://127.0.0.1:8080/assets/"+category+"/"+imgs[0])
+			c.Redirect(http.StatusSeeOther, "/assets/"+category+"/"+imgs[0])
 		}
 	} else {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "error": "没有这个图片类别"})

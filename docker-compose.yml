@@ -1,0 +1,12 @@
+services:
+  random_local_asset_api:
+    image: lambdayh/random_local_asset_api
+    container_name: random_local_asset_api
+    restart: unless-stopped
+    volumes:
+      # 配置文件路径
+      - "./config.yaml:/config.yaml"
+      # 配置文件中填写的路径都要映射过去
+      - "LOCAL_DIR:REMOTE_DIR"
+    ports:
+      - "8080:8080"

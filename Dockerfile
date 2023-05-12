@@ -7,6 +7,5 @@ RUN go build -tags=jsoniter -o app .
 
 FROM istio/distroless
 COPY --from=builder ["/build/app", "/"]"
-WORKDIR /config
 ENV GIN_MODE=release
 ENTRYPOINT ["/app"]
