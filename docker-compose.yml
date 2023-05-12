@@ -1,6 +1,6 @@
 services:
   random_local_asset_api:
-    image: lambdayh/random_local_asset_api
+    image: lambdayh/random_local_asset_api:latest
     container_name: random_local_asset_api
     restart: unless-stopped
     volumes:
