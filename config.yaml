@@ -1,0 +1,5 @@
+- folder: /FOLDER_OF_ASSETS
+  category: default
+  suffixes: 
+    - ".jpg"
+    - ".png"
