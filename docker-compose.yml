@@ -1,6 +1,6 @@
 services:
   random_local_asset_api:
-    image: lambdayh/random_local_asset_api
+    image: lambdayh/random_local_asset_api:lastest
     container_name: random_local_asset_api
     restart: unless-stopped
     volumes:
@@ -10,3 +10,20 @@ services:
       - "LOCAL_DIR:REMOTE_DIR"
     ports:
       - "8080:8080"
+      
+  caddy:
+    image: caddy:lastest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - $PWD/Caddyfile:/etc/caddy/Caddyfile
+      - $PWD/site:/srv
+      - caddy_data:/data
+      - caddy_config:/config
+    links:
+      - random_local_asset_api
+    depends_on:
+      - random_local_asset_api
