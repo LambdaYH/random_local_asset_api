@@ -1,29 +1,12 @@
 services:
   random_local_asset_api:
-    image: lambdayh/random_local_asset_api:lastest
+    image: lambdayh/random_local_asset_api:latest
     container_name: random_local_asset_api
     restart: unless-stopped
     volumes:
       # 配置文件路径
-      - "./config.yaml:/config.yaml"
+      - "./config.yaml:/config/config.yaml"
       # 配置文件中填写的路径都要映射过去
       - "LOCAL_DIR:REMOTE_DIR"
     ports:
       - "8080:8080"
-      
-  caddy:
-    image: caddy:lastest
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - $PWD/Caddyfile:/etc/caddy/Caddyfile
-      - $PWD/site:/srv
-      - caddy_data:/data
-      - caddy_config:/config
-    links:
-      - random_local_asset_api
-    depends_on:
-      - random_local_asset_api
