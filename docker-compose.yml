@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: "https://example.com/" # 返回的链接
+      RELOAD: # 如果文件夹内容不变，则不用设置，反之以cron格式设置，定时重载文件夹资源
     volumes:
       # 映射文件夹
       # assets文件夹下的文件夹为一个类别，递归遍历文件夹所有文件

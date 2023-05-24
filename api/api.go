@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/fs"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -115,13 +117,7 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 	}
 }
 
-func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
-	api_group := r.Group("/api")
-
-	// === 本地资源api ===
-	assets_dir := "/assets/"
-	// 设置静态资源路径
-	r.Static("/assets", assets_dir)
+func loadLocalAssets(assets_dir string, db *bolt.DB, domain string) {
 	dirs, err := os.ReadDir(assets_dir)
 	if err != nil {
 		panic(err)
@@ -150,5 +146,33 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 			})
 		}
 	}
+}
+
+func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
+	api_group := r.Group("/api")
+
+	// === 本地资源api ===
+	assets_dir := "./assets/"
+	// 设置静态资源路径
+	r.Static("/assets", assets_dir)
+	// 加载本地资源
+	loadLocalAssets(assets_dir, db, domain)
+	if reload := os.Getenv("RELOAD"); reload != "" {
+		// 重新加载数据库
+		c := cron.New()
+		c.AddFunc(reload, func() {
+			log.Println("开始重新加载本地资源")
+			db.Update(func(tx *bolt.Tx) error {
+				for bucket := range buckets {
+					tx.DeleteBucket([]byte(bucket))
+				}
+				return nil
+			})
+			loadLocalAssets(assets_dir, db, domain)
+			log.Panicln("本地资源重载完成")
+		})
+		c.Start()
+	}
+
 	api_group.GET("/assets", assetsApiHandler(domain, db))
 }
