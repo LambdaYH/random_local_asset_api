@@ -3,10 +3,11 @@ services:
     image: lambdayh/random_local_asset_api:latest
     container_name: random_local_asset_api
     restart: unless-stopped
+    environment:
+      DOMAIN: "https://example.com/" # 返回的链接
     volumes:
-      # 配置文件路径
-      - "./config.yaml:/config/config.yaml"
-      # 配置文件中填写的路径都要映射过去
-      - "LOCAL_DIR:REMOTE_DIR"
+      # 映射文件夹
+      # assets文件夹下的文件夹为一个类别，递归遍历文件夹所有文件
+      - "LOCAL_DIR:/assets/REMOTE_DIR"
     ports:
       - "8080:8080"

@@ -1,23 +1,22 @@
 package api
 
 import (
-	"github.com/gin-gonic/gin"
-	"gopkg.in/yaml.v3"
+	"encoding/binary"
+	"fmt"
+	"io/fs"
 	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/gin-gonic/gin"
+	bolt "go.etcd.io/bbolt"
 )
 
-var category_pic map[string][]string = make(map[string][]string)
-var category_folder map[string]string = make(map[string]string)
-
-type ConfigItem struct {
-	Folder   string   `yaml:"folder"`
-	Category string   `yaml:"category"`
-	Suffixes []string `yaml:"suffixes,flow"`
-}
+var buckets map[string]int = make(map[string]int)
 
 type RetJson struct {
 	Code  int         `json:"code"`
@@ -25,101 +24,133 @@ type RetJson struct {
 	Data  interface{} `json:"data,omitempty"`
 }
 
-type ImageData struct {
+type LocalData struct {
 	Url string `json:"url"`
 }
 
-func loadConfig() []ConfigItem {
-	config_path := "/config/config.yaml"
-	config_file, err := os.ReadFile(config_path)
-	if err != nil {
-		panic(err)
-	}
-	var configs []ConfigItem
-	if err := yaml.Unmarshal(config_file, &configs); err != nil {
-		panic(err)
-	}
-	return configs
+func ui64tob(v uint64) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, v)
+	return b
 }
 
-func loadImages(configs []ConfigItem) {
-	for _, config := range configs {
-		category_folder[config.Category] = config.Folder
-		all_files, err := os.ReadDir(config.Folder)
-		if err != nil {
-			panic(err)
-		}
-		suffixes_map := make(map[string]struct{})
-		for _, suffix := range config.Suffixes {
-			suffixes_map[suffix] = struct{}{}
-		}
-		for _, file := range all_files {
-			if _, ok := suffixes_map[filepath.Ext(file.Name())]; ok {
-				category_pic[config.Category] = append(category_pic[config.Category], file.Name())
-			}
-		}
-	}
+func itob(v int) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, uint64(v))
+	return b
 }
 
 // 返回随机资源
-func assetsApiHandler(c *gin.Context) {
-	ret_type := c.DefaultQuery("type", "json")
-	category := c.Query("category")
-	count_param := c.DefaultQuery("count", "1")
-	count, err := strconv.Atoi(count_param)
-	if err != nil {
-		c.JSON(http.StatusOK, RetJson{Code: 0, Error: "count参数必须为数字"})
-		return
-	}
-	if count >= 100 {
-		c.JSON(http.StatusOK, RetJson{Code: 0, Error: "count不能超过100"})
-		return
-	}
-	if count <= 0 {
-		c.JSON(http.StatusOK, RetJson{Code: 0, Error: "count必须为正整数"})
-		return
-	}
-	if _, ok := category_folder[category]; ok {
-		imgs := make([]string, count)
-		len_cate := len(category_pic[category])
-		if len_cate < count {
-			c.JSON(http.StatusOK, RetJson{Code: 0, Error: "目录下不存在足够的图片"})
+func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ret_type := c.DefaultQuery("type", "json")
+		category := c.Query("category")
+		count_param := c.DefaultQuery("count", "1")
+		count, err := strconv.Atoi(count_param)
+		if err != nil {
+			c.JSON(http.StatusOK, RetJson{Code: 0, Error: "count参数必须为数字"})
 			return
 		}
-		selected_imgs := make(map[int]struct{})
-		for i := 0; i < count; i++ {
-			random_idx := rand.Intn(len_cate)
-			if _, ok := selected_imgs[random_idx]; ok {
-				// 重新选一次，因为这个已经被选了
-				i--
-			}
-			selected_imgs[random_idx] = struct{}{}
-			imgs[i] = category_pic[category][random_idx]
+		if count >= 100 {
+			c.JSON(http.StatusOK, RetJson{Code: 0, Error: "count不能超过100"})
+			return
 		}
-		if ret_type == "json" {
-			// json时候正常返回数量
-			data := make([]ImageData, count)
-			for i, img := range imgs {
-				data[i] = ImageData{Url: "/assets/" + category + "/" + img}
-			}
-			c.JSON(http.StatusOK, RetJson{Code: 1, Data: data})
-		} else if ret_type == "file" {
-			// img时候直接重定向，忽略数量
-			c.Redirect(http.StatusSeeOther, "/assets/"+category+"/"+imgs[0])
+		if count <= 0 {
+			c.JSON(http.StatusOK, RetJson{Code: 0, Error: "count必须为正整数"})
+			return
 		}
-	} else {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "error": "没有这个图片类别"})
+		if _, ok := buckets[category]; ok {
+			// 记录文件的id
+			items := make([]int, count)
+			item_total_count := buckets[category]
+			if item_total_count < count {
+				c.JSON(http.StatusOK, RetJson{Code: 0, Error: "目录下不存在足够的文件"})
+				return
+			}
+			selected_items := make(map[int]struct{})
+			for i := 0; i < count; i++ {
+				random_idx := rand.Intn(item_total_count) + 1
+				if _, ok := selected_items[random_idx]; ok {
+					// 重新选一次，因为这个已经被选了
+					i--
+				}
+				selected_items[random_idx] = struct{}{}
+				items[i] = random_idx
+			}
+			db.View(func(tx *bolt.Tx) error {
+				b := tx.Bucket([]byte(category))
+				if ret_type == "json" {
+					// json时候正常返回数量
+					data := make([]LocalData, count)
+					if count == 1 {
+						var build strings.Builder
+						build.WriteString(domain)
+						build.Write(b.Get(itob(items[0])))
+						data[0] = LocalData{Url: build.String()}
+					} else {
+						var wait_group sync.WaitGroup
+						for idx, item_id := range items {
+							wait_group.Add(1)
+							go func(idx int, item_id int) {
+								var build strings.Builder
+								build.WriteString(domain)
+								build.Write(b.Get(itob(item_id)))
+								data[idx] = LocalData{Url: build.String()}
+								wait_group.Done()
+							}(idx, item_id)
+						}
+						wait_group.Wait()
+					}
+					c.JSON(http.StatusOK, RetJson{Code: 1, Data: data})
+				} else if ret_type == "file" {
+					// file时候直接重定向，忽略数量
+					var build strings.Builder
+					build.WriteByte('/')
+					build.Write(b.Get(itob(items[0])))
+					c.Redirect(http.StatusSeeOther, build.String())
+				}
+				return nil
+			})
+		} else {
+			c.JSON(http.StatusOK, gin.H{"code": 0, "error": "没有这个文件夹"})
+		}
 	}
 }
 
-func RegisterApi(r *gin.Engine) {
-	configs := loadConfig()
-	loadImages(configs)
+func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 	api_group := r.Group("/api")
-	for _, config := range configs {
-		r.Static("/assets/"+config.Category, config.Folder)
-	}
 
-	// 图片api
-	api_group.GET("/assets", assetsApiHandler)
+	// === 本地资源api ===
+	assets_dir := "/assets/"
+	// 设置静态资源路径
+	r.Static("/assets", assets_dir)
+	dirs, err := os.ReadDir(assets_dir)
+	if err != nil {
+		panic(err)
+	}
+	for _, dir := range dirs {
+		if dir.IsDir() {
+			// 每个文件夹对应一个bucket
+			//
+			db.Update(func(tx *bolt.Tx) error {
+				bucket, err := tx.CreateBucketIfNotExists([]byte(dir.Name()))
+				if err != nil {
+					return fmt.Errorf("create bucket: %s", err)
+				}
+				filepath.WalkDir(assets_dir+dir.Name(), func(path string, di fs.DirEntry, err error) error {
+					file, _ := os.Stat(path)
+					if !file.IsDir() {
+						id, _ := bucket.NextSequence()
+						bucket.Put(ui64tob(id), []byte(path))
+					}
+					return nil
+				})
+				// 记录最大id
+				id, _ := bucket.NextSequence()
+				buckets[dir.Name()] = int(id) - 1
+				return nil
+			})
+		}
+	}
+	api_group.GET("/assets", assetsApiHandler(domain, db))
 }
