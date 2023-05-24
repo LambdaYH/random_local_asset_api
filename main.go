@@ -25,9 +25,9 @@ func main() {
 	// 获取配置的域名，返回链接用
 	domain := os.Getenv("DOMAIN")
 	if domain == "" {
-		domain = "http://127.0.0.1:8080/"
-	} else if domain[len(domain)-1] != '/' {
-		domain = domain + "/"
+		domain = "http://127.0.0.1:8080"
+	} else if domain[len(domain)-1] == '/' {
+		domain = domain[:len(domain) - 1]
 	}
 	// 注册api
 	api.RegisterApi(r, db, domain)

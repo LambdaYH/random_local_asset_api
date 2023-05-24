@@ -3,9 +3,9 @@ WORKDIR /build
 COPY . /build
 RUN go mod download
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-RUN go build -tags=jsoniter -o app .
+RUN go build -tags=jsoniter -o api_server .
 
 FROM istio/distroless
-COPY --from=builder ["/build/app", "/"]"
+COPY --from=builder ["/build/api_server", "/"]"
 ENV GIN_MODE=release
-ENTRYPOINT ["/app"]
+ENTRYPOINT ["/api_server"]
