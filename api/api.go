@@ -152,16 +152,16 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 	api_group := r.Group("/api")
 
 	// === 本地资源api ===
-	assets_dir := "./assets/"
+	assets_dir := "/assets/"
 	// 设置静态资源路径
 	r.Static("/assets", assets_dir)
 	// 加载本地资源
 	loadLocalAssets(assets_dir, db, domain)
-	if reload := os.Getenv("RELOAD"); reload != "" {
+	if reload := os.Getenv("RELOAD"); reload == "" {
 		// 重新加载数据库
 		log.Println("已配置本地资源重载：" + reload)
 		c := cron.New()
-		c.AddFunc(reload, func() {
+		c.AddFunc("*/1 * * * *", func() {
 			log.Println("开始重新加载本地资源")
 			db.Update(func(tx *bolt.Tx) error {
 				for bucket := range buckets {
@@ -169,6 +169,7 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 				}
 				return nil
 			})
+			buckets = make(map[string]int)
 			loadLocalAssets(assets_dir, db, domain)
 			log.Println("本地资源重载完成")
 		})
