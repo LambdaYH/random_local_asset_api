@@ -23,7 +23,7 @@ services:
     volumes:
       # 映射文件夹
       # assets文件夹下的文件夹为一个类别，递归遍历文件夹所有文件
-      - "/srv/local_dir/:/assets/local_dir_in_docker"
+      - "/srv/local_dir/:/assets/local"
     ports:
       - "8080:8080"
 ```
