@@ -161,7 +161,7 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 		// 重新加载数据库
 		log.Println("已配置本地资源重载：" + reload)
 		c := cron.New()
-		c.AddFunc("*/1 * * * *", func() {
+		c.AddFunc(reload, func() {
 			log.Println("开始重新加载本地资源")
 			db.Update(func(tx *bolt.Tx) error {
 				for bucket := range buckets {
