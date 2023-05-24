@@ -159,6 +159,7 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 	loadLocalAssets(assets_dir, db, domain)
 	if reload := os.Getenv("RELOAD"); reload != "" {
 		// 重新加载数据库
+		log.Println("已配置本地资源重载：" + reload)
 		c := cron.New()
 		c.AddFunc(reload, func() {
 			log.Println("开始重新加载本地资源")
@@ -169,7 +170,7 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 				return nil
 			})
 			loadLocalAssets(assets_dir, db, domain)
-			log.Panicln("本地资源重载完成")
+			log.Println("本地资源重载完成")
 		})
 		c.Start()
 	}
