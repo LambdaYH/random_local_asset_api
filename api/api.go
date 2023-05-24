@@ -40,6 +40,13 @@ func itob(v int) []byte {
 	return b
 }
 
+func buildURL(domain string, filepath []byte) string {
+	var build strings.Builder
+	build.WriteString(domain)
+	build.Write(filepath)
+	return build.String()
+}
+
 // 返回随机资源
 func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -83,19 +90,13 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 					// json时候正常返回数量
 					data := make([]LocalData, count)
 					if count == 1 {
-						var build strings.Builder
-						build.WriteString(domain)
-						build.Write(b.Get(itob(items[0])))
-						data[0] = LocalData{Url: build.String()}
+						data[0] = LocalData{Url: buildURL(domain, b.Get(itob(items[0])))}
 					} else {
 						var wait_group sync.WaitGroup
 						for idx, item_id := range items {
 							wait_group.Add(1)
 							go func(idx int, item_id int) {
-								var build strings.Builder
-								build.WriteString(domain)
-								build.Write(b.Get(itob(item_id)))
-								data[idx] = LocalData{Url: build.String()}
+								data[idx] = LocalData{Url: buildURL(domain, b.Get(itob(item_id)))}
 								wait_group.Done()
 							}(idx, item_id)
 						}
@@ -104,10 +105,7 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 					c.JSON(http.StatusOK, RetJson{Code: 1, Data: data})
 				} else if ret_type == "file" {
 					// file时候直接重定向，忽略数量
-					var build strings.Builder
-					build.WriteByte('/')
-					build.Write(b.Get(itob(items[0])))
-					c.Redirect(http.StatusSeeOther, build.String())
+					c.Redirect(http.StatusSeeOther, buildURL(domain, b.Get(itob(items[0]))))
 				}
 				return nil
 			})
