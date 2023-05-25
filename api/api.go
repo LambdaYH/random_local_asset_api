@@ -12,13 +12,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
-	"github.com/robfig/cron/v3"
 	bolt "go.etcd.io/bbolt"
 )
 
 var buckets map[string]int = make(map[string]int)
+var buckets_timer map[string]*time.Timer = make(map[string]*time.Timer)
 
 type RetJson struct {
 	Code  int         `json:"code"`
@@ -117,7 +119,8 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 	}
 }
 
-func loadLocalAssets(assets_dir string, db *bolt.DB, domain string) {
+// 首次加载资源
+func loadLocalAssets(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher) {
 	dirs, err := os.ReadDir(assets_dir)
 	if err != nil {
 		panic(err)
@@ -136,19 +139,50 @@ func loadLocalAssets(assets_dir string, db *bolt.DB, domain string) {
 					if !file.IsDir() {
 						id, _ := bucket.NextSequence()
 						bucket.Put(ui64tob(id), []byte(path))
+					} else {
+						// 子路径加入watcher监听中
+						watcher.Add(path)
 					}
 					return nil
 				})
 				// 记录最大id
 				id, _ := bucket.NextSequence()
 				buckets[dir.Name()] = int(id) - 1
+				// 监听文件变动
+				watcher.Add(assets_dir + dir.Name())
 				return nil
 			})
 		}
 	}
 }
 
-func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
+// 文件变动时重载bucket
+func reloadBucket(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher, bucket_name string) {
+	db.Update(func(tx *bolt.Tx) error {
+		tx.DeleteBucket([]byte(bucket_name))
+		bucket, err := tx.CreateBucketIfNotExists([]byte(bucket_name))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+		filepath.WalkDir(assets_dir+bucket_name, func(path string, di fs.DirEntry, err error) error {
+			file, err := os.Stat(path)
+			if err != nil {
+				return err
+			}
+			if !file.IsDir() {
+				id, _ := bucket.NextSequence()
+				bucket.Put(ui64tob(id), []byte(path))
+			}
+			return nil
+		})
+		// 记录最大id
+		id, _ := bucket.NextSequence()
+		buckets[bucket_name] = int(id) - 1
+		return nil
+	})
+}
+
+func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain string) {
 	api_group := r.Group("/api")
 
 	// === 本地资源api ===
@@ -156,25 +190,67 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, domain string) {
 	// 设置静态资源路径
 	r.Static("/assets", assets_dir)
 	// 加载本地资源
-	loadLocalAssets(assets_dir, db, domain)
-	if reload := os.Getenv("RELOAD"); reload != "" {
-		// 重新加载数据库
-		log.Println("已配置本地资源重载：" + reload)
-		c := cron.New()
-		c.AddFunc(reload, func() {
-			log.Println("开始重新加载本地资源")
-			db.Update(func(tx *bolt.Tx) error {
-				for bucket := range buckets {
-					tx.DeleteBucket([]byte(bucket))
+	loadLocalAssets(assets_dir, db, watcher)
+	// 启用watcher监听
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
 				}
-				return nil
-			})
-			buckets = make(map[string]int)
-			loadLocalAssets(assets_dir, db, domain)
-			log.Println("本地资源重载完成")
-		})
-		c.Start()
-	}
-
+				log.Println("文件发生变化:", event)
+				if event.Has(fsnotify.Create) {
+					// 如果是文件夹，加入监听
+					file, _ := os.Stat(event.Name)
+					if file.IsDir() {
+						watcher.Add(event.Name)
+					}
+				}
+				if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) || event.Has(fsnotify.Write) {
+					splits := strings.Split(event.Name, "/")
+					bucket_name := splits[2]
+					// 如果是删除一个类别，那么把桶也删了
+					if event.Has(fsnotify.Remove) {
+						if len(splits) == 3 {
+							delete(buckets, bucket_name)
+							delete(buckets_timer, bucket_name)
+							db.Update(func(tx *bolt.Tx) error {
+								tx.DeleteBucket([]byte(bucket_name))
+								return nil
+							})
+							log.Println("已清除文件夹：" + bucket_name)
+						}
+					} else {
+						if timer, ok := buckets_timer[bucket_name]; !ok || timer == nil {
+							// 没有定时任务，创建5min的一个延时定时器
+							buckets_timer[bucket_name] = time.NewTimer(5 * time.Minute)
+							// 创建重载桶的任务
+							go func(bucket_name string, timer *time.Timer) {
+								<-timer.C
+								log.Println("开始重载文件夹：" + bucket_name)
+								reloadBucket(assets_dir, db, watcher, bucket_name)
+								log.Println("文件夹重载完成：" + bucket_name)
+								// 删除定时器
+								buckets_timer[bucket_name] = nil
+							}(bucket_name, buckets_timer[bucket_name])
+						} else {
+							// 说明已经存在了一个定时器，把他重置
+							if !buckets_timer[bucket_name].Stop() {
+								<-buckets_timer[bucket_name].C
+							}
+							buckets_timer[bucket_name].Reset(5 * time.Minute)
+						}
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Println("error:", err)
+			}
+		}
+	}()
+	watcher.Add(assets_dir)
 	api_group.GET("/assets", assetsApiHandler(domain, db))
 }

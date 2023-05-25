@@ -3,8 +3,8 @@ module random_local_asset_api
 go 1.20
 
 require (
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-gonic/gin v1.9.0
-	github.com/robfig/cron/v3 v3.0.0
 	go.etcd.io/bbolt v1.3.7
 )
 

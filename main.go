@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	bolt "go.etcd.io/bbolt"
 
@@ -27,10 +28,16 @@ func main() {
 	if domain == "" {
 		domain = "http://127.0.0.1:8080"
 	} else if domain[len(domain)-1] == '/' {
-		domain = domain[:len(domain) - 1]
+		domain = domain[:len(domain)-1]
 	}
+	// 打开个watcher监听文件变动
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		panic(err)
+	}
+	defer watcher.Close()
 	// 注册api
-	api.RegisterApi(r, db, domain)
+	api.RegisterApi(r, db, watcher, domain)
 	// 启动
 	r.Run(":8080")
 }
