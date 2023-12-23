@@ -38,6 +38,7 @@ func main() {
 	defer watcher.Close()
 	// 注册api
 	api.RegisterApi(r, db, watcher, domain)
+	r.Use(corsMiddleware())
 	// 启动
 	r.Run(":8080")
 }
