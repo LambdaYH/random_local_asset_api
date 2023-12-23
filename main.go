@@ -36,8 +36,30 @@ func main() {
 		panic(err)
 	}
 	defer watcher.Close()
+	// 中间件
+	r.Use(corsMiddleware())
 	// 注册api
 	api.RegisterApi(r, db, watcher, domain)
 	// 启动
 	r.Run(":8080")
+}
+
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 允许所有来源的请求
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		// 允许特定的HTTP方法
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		// 允许特定的HTTP头部字段
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// 如果是预检请求（OPTIONS），则直接返回200状态码
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(200)
+			return
+		}
+
+		// 继续处理请求
+		c.Next()
+	}
 }
