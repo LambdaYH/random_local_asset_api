@@ -199,7 +199,6 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain s
 				if !ok {
 					return
 				}
-				log.Println("文件发生变化:", event)
 				if event.Has(fsnotify.Create) {
 					// 如果是文件夹，加入监听
 					file, _ := os.Stat(event.Name)
@@ -208,6 +207,7 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain s
 					}
 				}
 				if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) {
+					log.Println("文件发生变化:", event)
 					splits := strings.Split(event.Name, "/")
 					bucket_name := splits[2]
 					// 如果是删除一个类别，那么把桶也删了
