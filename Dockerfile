@@ -1,11 +1,11 @@
-FROM golang:1.21 AS builder
+FROM golang:1.21-alpine AS builder
 WORKDIR /build
 COPY . /build
 RUN go mod download
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
 RUN go build -tags=jsoniter -o api_server .
 
-FROM istio/distroless
+FROM alpine:latest
 COPY --from=builder /build/api_server /
+RUN mkdir -p /assets
 ENV GIN_MODE=release
-ENTRYPOINT ["/api_server"]
+CMD /api_server
