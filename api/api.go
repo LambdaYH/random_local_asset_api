@@ -192,7 +192,11 @@ func loadLocalAssets(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher) 
 		if dir.IsDir() {
 			// 每个文件夹对应一个bucket
 			db.Update(func(tx *bolt.Tx) error {
-				bucket, err := tx.CreateBucketIfNotExists([]byte(dir.Name()))
+				// 删除已存在的桶
+				if err := tx.DeleteBucket([]byte(dir.Name())); err != nil && err != bolt.ErrBucketNotFound {
+					return fmt.Errorf("delete bucket: %s", err)
+				}
+				bucket, err := tx.CreateBucket([]byte(dir.Name()))
 				if err != nil {
 					return fmt.Errorf("create bucket: %s", err)
 				}
@@ -277,7 +281,7 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain s
 					} else {
 						if timer, ok := buckets_timer[bucket_name]; !ok || timer == nil {
 							// 没有定时任务，创建5min的一个延时定时器
-							buckets_timer[bucket_name] = time.NewTimer(5 * time.Minute)
+							buckets_timer[bucket_name] = time.NewTimer(1 * time.Minute)
 							// 创建重载桶的任务
 							go func(bucket_name string, timer *time.Timer) {
 								<-timer.C
