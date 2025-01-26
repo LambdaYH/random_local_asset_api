@@ -15,14 +15,23 @@ func main() {
 	r := gin.New()
 
 	// 打开数据库
-	db_path := "/data/db"
-	os.MkdirAll(db_path, 0755)
-	db_file_path := db_path + "/local_assets.db"
-	db, err := bolt.Open(db_file_path, 0600, nil)
+	dbPath := "/data/db"
+	err := os.MkdirAll(dbPath, 0755)
+	if err != nil {
+		log.Fatal("目录创建失败", err)
+		return
+	}
+	dbFilePath := dbPath + "/local_assets.db"
+	db, err := bolt.Open(dbFilePath, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	defer func(db *bolt.DB) {
+		err := db.Close()
+		if err != nil {
+
+		}
+	}(db)
 	// 获取配置的域名，返回链接用
 	domain := os.Getenv("DOMAIN")
 	if domain == "" {
@@ -35,13 +44,22 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer watcher.Close()
+	defer func(watcher *fsnotify.Watcher) {
+		err := watcher.Close()
+		if err != nil {
+
+		}
+	}(watcher)
 	// 中间件
 	r.Use(corsMiddleware())
 	// 注册api
 	api.RegisterApi(r, db, watcher, domain)
 	// 启动
-	r.Run(":8080")
+	err = r.Run(":8080")
+	if err != nil {
+		log.Fatal("启动失败", err)
+		return
+	}
 }
 
 func corsMiddleware() gin.HandlerFunc {

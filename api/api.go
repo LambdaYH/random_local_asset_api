@@ -92,15 +92,30 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 				b := tx.Bucket([]byte(category))
 				if ret_type == "json" {
 					// json时候正常返回数量
+					if c.Request.Method == "HEAD" {
+						c.Header("Content-Type", "application/json")
+						c.Status(http.StatusOK)
+						return nil
+					}
 					data := make([]LocalData, count)
 					if count == 1 {
-						data[0] = LocalData{Url: buildURL(domain, b.Get(itob(items[0])))}
+						filePath := b.Get(itob(items[0]))
+						if filePath == nil {
+							c.JSON(http.StatusOK, RetJson{Code: 0, Error: "文件路径未找到"})
+							return nil
+						}
+						data[0] = LocalData{Url: buildURL(domain, filePath)}
 					} else {
 						var wait_group sync.WaitGroup
 						for idx, item_id := range items {
 							wait_group.Add(1)
 							go func(idx int, item_id int) {
-								data[idx] = LocalData{Url: buildURL(domain, b.Get(itob(item_id)))}
+								filePath := b.Get(itob(item_id))
+								if filePath != nil {
+									data[idx] = LocalData{Url: buildURL(domain, filePath)}
+								} else {
+									data[idx] = LocalData{Url: ""}
+								}
 								wait_group.Done()
 							}(idx, item_id)
 						}
@@ -109,6 +124,11 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 					c.JSON(http.StatusOK, RetJson{Code: 1, Data: data})
 				} else if ret_type == "file" {
 					// file时候直接重定向，忽略数量
+					if c.Request.Method == "HEAD" {
+						c.Header("Location", buildURL(domain, b.Get(itob(items[0]))))
+						c.Status(http.StatusSeeOther)
+						return nil
+					}
 					c.Redirect(http.StatusSeeOther, buildURL(domain, b.Get(itob(items[0]))))
 				}
 				return nil
@@ -121,6 +141,16 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 
 // 首次加载资源
 func loadLocalAssets(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher) {
+	// 读取环境变量 FILE_EXTENSIONS
+	fileExtensions := os.Getenv("FILE_EXTENSIONS")
+	var extensions []string
+	if fileExtensions != "" {
+		extensions = strings.Split(fileExtensions, ",")
+	}
+	if len(extensions) > 0 {
+		log.Println("已加载文件后缀过滤，仅处理", strings.Join(extensions, ", "))
+	}
+
 	dirs, err := os.ReadDir(assets_dir)
 	if err != nil {
 		panic(err)
@@ -137,6 +167,11 @@ func loadLocalAssets(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher) 
 				filepath.WalkDir(assets_dir+dir.Name(), func(path string, di fs.DirEntry, err error) error {
 					file, _ := os.Stat(path)
 					if !file.IsDir() {
+						// 检查文件后缀是否在 extensions 列表中
+						ext := filepath.Ext(path)
+						if len(extensions) > 0 && !contains(extensions, ext) {
+							return nil
+						}
 						id, _ := bucket.NextSequence()
 						bucket.Put(ui64tob(id), []byte(path))
 					} else {
@@ -252,5 +287,17 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain s
 		}
 	}()
 	watcher.Add(assets_dir)
-	api_group.GET("/assets", assetsApiHandler(domain, db))
+	// 修改: 同时支持 GET 和 HEAD 方法
+	api_group.Handle("GET", "/assets", assetsApiHandler(domain, db))
+	api_group.Handle("HEAD", "/assets", assetsApiHandler(domain, db))
+}
+
+// 添加 contains 函数用于检查切片中是否包含某个元素
+func contains(slice []string, element string) bool {
+	for _, elem := range slice {
+		if elem == element {
+			return true
+		}
+	}
+	return false
 }
