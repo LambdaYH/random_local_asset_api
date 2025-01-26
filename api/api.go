@@ -139,6 +139,39 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 	}
 }
 
+func processDirectory(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher, bucket_name string, bucket *bolt.Bucket, extensions []string) error {
+	filepath.WalkDir(filepath.Join(assets_dir, bucket_name), func(path string, di fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// 跳过根目录自身
+		if path == filepath.Join(assets_dir, bucket_name) {
+			return nil
+		}
+		file, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if !file.IsDir() {
+			// 检查文件后缀是否在 extensions 列表中
+			ext := filepath.Ext(path)
+			if len(extensions) > 0 && !contains(extensions, ext) {
+				return nil
+			}
+			id, _ := bucket.NextSequence()
+			bucket.Put(ui64tob(id), []byte(path))
+		} else {
+			// 子路径加入watcher监听中
+			watcher.Add(path)
+		}
+		return nil
+	})
+	// 记录最大id
+	id, _ := bucket.NextSequence()
+	buckets[bucket_name] = int(id) - 1
+	return nil
+}
+
 // 首次加载资源
 func loadLocalAssets(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher) {
 	// 读取环境变量 FILE_EXTENSIONS
@@ -158,33 +191,17 @@ func loadLocalAssets(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher) 
 	for _, dir := range dirs {
 		if dir.IsDir() {
 			// 每个文件夹对应一个bucket
-			//
 			db.Update(func(tx *bolt.Tx) error {
 				bucket, err := tx.CreateBucketIfNotExists([]byte(dir.Name()))
 				if err != nil {
 					return fmt.Errorf("create bucket: %s", err)
 				}
-				filepath.WalkDir(assets_dir+dir.Name(), func(path string, di fs.DirEntry, err error) error {
-					file, _ := os.Stat(path)
-					if !file.IsDir() {
-						// 检查文件后缀是否在 extensions 列表中
-						ext := filepath.Ext(path)
-						if len(extensions) > 0 && !contains(extensions, ext) {
-							return nil
-						}
-						id, _ := bucket.NextSequence()
-						bucket.Put(ui64tob(id), []byte(path))
-					} else {
-						// 子路径加入watcher监听中
-						watcher.Add(path)
-					}
-					return nil
-				})
-				// 记录最大id
-				id, _ := bucket.NextSequence()
-				buckets[dir.Name()] = int(id) - 1
+				err = processDirectory(assets_dir, db, watcher, dir.Name(), bucket, extensions)
+				if err != nil {
+					return err
+				}
 				// 监听文件变动
-				watcher.Add(assets_dir + dir.Name())
+				watcher.Add(filepath.Join(assets_dir, dir.Name()))
 				return nil
 			})
 		}
@@ -193,26 +210,26 @@ func loadLocalAssets(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher) 
 
 // 文件变动时重载bucket
 func reloadBucket(assets_dir string, db *bolt.DB, watcher *fsnotify.Watcher, bucket_name string) {
+	// 读取环境变量 FILE_EXTENSIONS
+	fileExtensions := os.Getenv("FILE_EXTENSIONS")
+	var extensions []string
+	if fileExtensions != "" {
+		extensions = strings.Split(fileExtensions, ",")
+	}
+	if len(extensions) > 0 {
+		log.Println("已加载文件后缀过滤，仅处理", strings.Join(extensions, ", "))
+	}
+
 	db.Update(func(tx *bolt.Tx) error {
 		tx.DeleteBucket([]byte(bucket_name))
 		bucket, err := tx.CreateBucketIfNotExists([]byte(bucket_name))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}
-		filepath.WalkDir(assets_dir+bucket_name, func(path string, di fs.DirEntry, err error) error {
-			file, err := os.Stat(path)
-			if err != nil {
-				return err
-			}
-			if !file.IsDir() {
-				id, _ := bucket.NextSequence()
-				bucket.Put(ui64tob(id), []byte(path))
-			}
-			return nil
-		})
-		// 记录最大id
-		id, _ := bucket.NextSequence()
-		buckets[bucket_name] = int(id) - 1
+		err = processDirectory(assets_dir, db, watcher, bucket_name, bucket, extensions)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 }
@@ -243,7 +260,8 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain s
 				}
 				if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) {
 					log.Println("文件发生变化:", event)
-					splits := strings.Split(event.Name, "/")
+					// 修改: 使用 filepath.Separator 替换 "/"
+					splits := strings.Split(event.Name, string(filepath.Separator))
 					bucket_name := splits[2]
 					// 如果是删除一个类别，那么把桶也删了
 					if event.Has(fsnotify.Remove) {
