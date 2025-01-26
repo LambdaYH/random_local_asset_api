@@ -312,6 +312,32 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain s
 	// 修改: 同时支持 GET 和 HEAD 方法
 	api_group.Handle("GET", "/assets", assetsApiHandler(domain, db))
 	api_group.Handle("HEAD", "/assets", assetsApiHandler(domain, db))
+
+	// 添加新的路由处理 /api 请求
+	api_group.GET("/", func(c *gin.Context) {
+		if len(c.Request.URL.Query()) == 0 {
+			var categories []string
+			db.View(func(tx *bolt.Tx) error {
+				return tx.ForEach(func(name []byte, _ *bolt.Bucket) error {
+					categories = append(categories, string(name))
+					return nil
+				})
+			})
+			// 设置响应头为 text/html 并指定 UTF-8 编码
+			c.Header("Content-Type", "text/html; charset=utf-8")
+
+			// 构建包含 <meta charset="UTF-8"> 的 HTML 响应
+			htmlContent := fmt.Sprintf(
+				"<html><head><meta charset=\"UTF-8\"></head><body><h1>使用说明</h1>"+
+					"<p>访问 /api/assets?category=<category_name>&count=<number> 来获取随机资源</p>"+
+					"<h2>类别列表</h2><ul><li>%s</li></ul></body></html>",
+				strings.Join(categories, "</li><li>"),
+			)
+			c.String(http.StatusOK, htmlContent)
+		} else {
+			c.Next()
+		}
+	})
 }
 
 // 添加 contains 函数用于检查切片中是否包含某个元素
