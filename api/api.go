@@ -125,11 +125,11 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 				} else if ret_type == "file" {
 					// file时候直接重定向，忽略数量
 					if c.Request.Method == "HEAD" {
-						c.Header("Location", buildURL("/", b.Get(itob(items[0]))))
+						c.Header("Location", buildURL("./", b.Get(itob(items[0]))))
 						c.Status(http.StatusSeeOther)
 						return nil
 					}
-					c.Redirect(http.StatusSeeOther, buildURL("/", b.Get(itob(items[0]))))
+					c.Redirect(http.StatusSeeOther, buildURL("./", b.Get(itob(items[0]))))
 				}
 				return nil
 			})
