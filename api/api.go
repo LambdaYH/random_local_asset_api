@@ -44,15 +44,25 @@ func itob(v int) []byte {
 	return b
 }
 
-func buildURL(domain string, filepath []byte) string {
+func buildURL(request *http.Request, filepath []byte) string {
 	var build strings.Builder
-	build.WriteString(domain)
+	// 获取请求协议 (http 或 https)
+	scheme := "http"
+	if request.TLS != nil {
+		scheme = "https"
+	}
+	// 获取请求主机名
+	host := request.Host
+	// 拼接完整的 URL
+	build.WriteString(scheme)
+	build.WriteString("://")
+	build.WriteString(host)
 	build.Write(filepath)
 	return build.String()
 }
 
 // 返回随机资源
-func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
+func assetsApiHandler(db *bolt.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ret_type := c.DefaultQuery("type", "json")
 		category := c.Query("category")
@@ -104,7 +114,7 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 							c.JSON(http.StatusOK, RetJson{Code: 0, Error: "文件路径未找到"})
 							return nil
 						}
-						data[0] = LocalData{Url: buildURL(domain, filePath)}
+						data[0] = LocalData{Url: buildURL(c.Request, filePath)}
 					} else {
 						var wait_group sync.WaitGroup
 						for idx, item_id := range items {
@@ -112,7 +122,7 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 							go func(idx int, item_id int) {
 								filePath := b.Get(itob(item_id))
 								if filePath != nil {
-									data[idx] = LocalData{Url: buildURL(domain, filePath)}
+									data[idx] = LocalData{Url: buildURL(c.Request, filePath)}
 								} else {
 									data[idx] = LocalData{Url: ""}
 								}
@@ -125,11 +135,11 @@ func assetsApiHandler(domain string, db *bolt.DB) gin.HandlerFunc {
 				} else if ret_type == "file" {
 					// file时候直接重定向，忽略数量
 					if c.Request.Method == "HEAD" {
-						c.Header("Location", buildURL("./", b.Get(itob(items[0]))))
+						c.Header("Location", buildURL(c.Request, b.Get(itob(items[0]))))
 						c.Status(http.StatusSeeOther)
 						return nil
 					}
-					c.Redirect(http.StatusSeeOther, buildURL("./", b.Get(itob(items[0]))))
+					c.Redirect(http.StatusSeeOther, buildURL(c.Request, b.Get(itob(items[0]))))
 				}
 				return nil
 			})
@@ -310,8 +320,8 @@ func RegisterApi(r *gin.Engine, db *bolt.DB, watcher *fsnotify.Watcher, domain s
 	}()
 	watcher.Add(assets_dir)
 	// 修改: 同时支持 GET 和 HEAD 方法
-	api_group.Handle("GET", "/assets", assetsApiHandler(domain, db))
-	api_group.Handle("HEAD", "/assets", assetsApiHandler(domain, db))
+	api_group.Handle("GET", "/assets", assetsApiHandler(db))
+	api_group.Handle("HEAD", "/assets", assetsApiHandler(db))
 
 	// 添加新的路由处理 /api 请求
 	api_group.GET("/", func(c *gin.Context) {
